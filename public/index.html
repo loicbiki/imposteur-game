@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Imposteur</title>
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Arial, sans-serif;
+      background: #111827;
+      color: white;
+      padding: 16px;
+    }
+
+    .box {
+      width: 100%;
+      max-width: 430px;
+      margin: auto;
+      background: #1f2937;
+      padding: 20px;
+      border-radius: 20px;
+      box-shadow: 0 10px 30px #000;
+    }
+
+    h1, h2, h3 {
+      text-align: center;
+    }
+
+    input, button {
+      width: 100%;
+      min-height: 50px;
+      padding: 14px;
+      margin-top: 10px;
+      border-radius: 12px;
+      border: none;
+      font-size: 16px;
+    }
+
+    input {
+      background: #f9fafb;
+      color: #111;
+    }
+
+    button {
+      background: #7c3aed;
+      color: white;
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    button.secondary {
+      background: #374151;
+    }
+
+    .players {
+      margin-top: 15px;
+      padding: 12px;
+      background: #111827;
+      border-radius: 12px;
+    }
+
+    .role {
+      margin-top: 20px;
+      padding: 24px;
+      background: black;
+      border-radius: 16px;
+      font-size: 24px;
+      text-align: center;
+      font-weight: bold;
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    #msg {
+      text-align: center;
+      color: #facc15;
+      font-weight: bold;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="box">
+    <h1>Imposteur</h1>
+
+    <input id="name" placeholder="Ton nom">
+    <input id="pin" placeholder="Ton PIN secret" type="password">
+    <input id="code" placeholder="Code salon">
+
+    <button onclick="createRoom()">Créer un salon</button>
+    <button onclick="joinRoom()" class="secondary">Rejoindre un salon</button>
+
+    <h2 id="roomCode"></h2>
+
+    <div class="players">
+      <strong>Joueurs connectés :</strong>
+      <ul id="players"></ul>
+    </div>
+
+    <button onclick="startGame()">Lancer la partie</button>
+
+    <h3>Voir mon rôle</h3>
+
+    <input id="revealName" placeholder="Nom du joueur">
+    <input id="revealPin" placeholder="PIN du joueur" type="password">
+
+    <button onclick="revealRole()">Voir mon rôle</button>
+    <button onclick="hideRole()" class="secondary">Masquer</button>
+
+    <div id="role" class="role hidden"></div>
+
+    <p id="msg"></p>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+
+  <script>
+    const socket = io();
+    let currentCode = "";
+
+    function createRoom() {
+      const name = document.getElementById("name").value.trim();
+      const pin = document.getElementById("pin").value.trim();
+
+      if (!name || !pin) return showMsg("Nom et PIN obligatoires.");
+
+      socket.emit("createRoom", { name, pin });
+    }
+
+    function joinRoom() {
+      const name = document.getElementById("name").value.trim();
+      const pin = document.getElementById("pin").value.trim();
+      const code = document.getElementById("code").value.trim().toUpperCase();
+
+      if (!name || !pin || !code) {
+        return showMsg("Nom, PIN et code obligatoires.");
+      }
+
+      socket.emit("joinRoom", { code, name, pin });
+    }
+
+    function startGame() {
+      if (!currentCode) return showMsg("Aucun salon actif.");
+      socket.emit("startGame", { code: currentCode });
+    }
+
+    function revealRole() {
+      const name = document.getElementById("revealName").value.trim();
+      const pin = document.getElementById("revealPin").value.trim();
+
+      if (!name || !pin) {
+        return showMsg("Entre ton nom et ton PIN.");
+      }
+
+      socket.emit("revealRole", {
+        code: currentCode,
+        name,
+        pin
+      });
+    }
+
+    function hideRole() {
+      const role = document.getElementById("role");
+      role.classList.add("hidden");
+      role.textContent = "";
+    }
+
+    function showMsg(text) {
+      document.getElementById("msg").textContent = text;
+    }
+
+    socket.on("roomCreated", ({ code }) => {
+      currentCode = code;
+      document.getElementById("roomCode").textContent = "Code salon : " + code;
+      showMsg("Salon créé.");
+    });
+
+    socket.on("joinedRoom", ({ code }) => {
+      currentCode = code;
+      document.getElementById("roomCode").textContent = "Code salon : " + code;
+      showMsg("Salon rejoint.");
+    });
+
+    socket.on("roomUpdate", (players) => {
+      const list = document.getElementById("players");
+      list.innerHTML = "";
+
+      players.forEach(player => {
+        const li = document.createElement("li");
+        li.textContent = player;
+        list.appendChild(li);
+      });
+    });
+
+    socket.on("gameStarted", () => {
+      showMsg("Partie lancée. Chaque joueur peut voir son rôle.");
+    });
+
+    socket.on("roleResult", (text) => {
+      const role = document.getElementById("role");
+      role.textContent = text;
+      role.classList.remove("hidden");
+    });
+
+    socket.on("errorMsg", showMsg);
+  </script>
+</body>
+</html>
