@@ -15,130 +15,110 @@ function makeCode() {
   return Math.random().toString(36).substring(2, 6).toUpperCase();
 }
 
-function getPublicPlayers(room) {
-  return room.players.map(function (player) {
-    return player.name;
+function chooseImpostor(room) {
+  if (room.players.length >= 3) {
+    const randomIndex = Math.floor(Math.random() * room.players.length);
+    room.impostorId = room.players[randomIndex].id;
+    room.started = true;
+  }
+}
+
+function sendRoomUpdate(code) {
+  const room = rooms[code];
+
+  room.players.forEach(function (player) {
+    const role = room.started
+      ? player.id === room.impostorId
+        ? "IMPOSTEUR"
+        : "INNOCENT"
+      : "En attente de 3 joueurs minimum...";
+
+    io.to(player.id).emit("roomUpdate", {
+      code: code,
+      players: room.players.map(p => p.name),
+      role: role,
+      maxPlayers: room.maxPlayers
+    });
   });
 }
 
 io.on("connection", function (socket) {
   socket.on("createRoom", function (data) {
     const name = data.name;
-    const pin = data.pin;
+    const maxPlayers = parseInt(data.maxPlayers, 10);
     const code = makeCode();
 
+    if (!name || !maxPlayers || maxPlayers < 3) {
+      socket.emit("errorMsg", "Pseudo obligatoire et minimum 3 joueurs.");
+      return;
+    }
+
     rooms[code] = {
+      maxPlayers: maxPlayers,
       players: [],
-      started: false,
       impostorId: null,
-      word: "Pizza"
+      started: false
     };
 
     rooms[code].players.push({
       id: socket.id,
-      name: name,
-      pin: pin
+      name: name
     });
 
     socket.join(code);
-
-    socket.emit("roomCreated", {
-      code: code
-    });
-
-    io.to(code).emit("roomUpdate", getPublicPlayers(rooms[code]));
+    chooseImpostor(rooms[code]);
+    sendRoomUpdate(code);
   });
 
   socket.on("joinRoom", function (data) {
-    let code = data.code.toUpperCase();
     const name = data.name;
-    const pin = data.pin;
+    const code = data.code.toUpperCase();
+
+    if (!name || !code) {
+      socket.emit("errorMsg", "Pseudo et code obligatoires.");
+      return;
+    }
 
     if (!rooms[code]) {
       socket.emit("errorMsg", "Salon introuvable.");
       return;
     }
 
-    if (rooms[code].started) {
-      socket.emit("errorMsg", "La partie a déjà commencé.");
-      return;
-    }
-
-    if (rooms[code].players.length >= 4) {
-      socket.emit("errorMsg", "Le salon est plein.");
+    if (rooms[code].players.length >= rooms[code].maxPlayers) {
+      socket.emit("errorMsg", "Salon plein.");
       return;
     }
 
     rooms[code].players.push({
       id: socket.id,
-      name: name,
-      pin: pin
+      name: name
     });
 
     socket.join(code);
 
-    socket.emit("joinedRoom", {
-      code: code
-    });
-
-    io.to(code).emit("roomUpdate", getPublicPlayers(rooms[code]));
-  });
-
-  socket.on("startGame", function (data) {
-    const code = data.code;
-    const room = rooms[code];
-
-    if (!room) {
-      socket.emit("errorMsg", "Salon introuvable.");
-      return;
-    }
-
-    if (room.players.length !== 4) {
-      socket.emit("errorMsg", "Il faut exactement 4 joueurs.");
-      return;
-    }
-
-    const randomIndex = Math.floor(Math.random() * room.players.length);
-    room.impostorId = room.players[randomIndex].id;
-    room.started = true;
-
-    io.to(code).emit("gameStarted");
-  });
-
-  socket.on("revealRole", function (data) {
-    const code = data.code;
-    const name = data.name;
-    const pin = data.pin;
-    const room = rooms[code];
-
-    if (!room) {
-      socket.emit("errorMsg", "Salon introuvable.");
-      return;
-    }
-
-    if (!room.started) {
-      socket.emit("errorMsg", "La partie n'a pas commencé.");
-      return;
-    }
-
-    const player = room.players.find(function (p) {
-      return p.name === name && p.pin === pin;
-    });
-
-    if (!player) {
-      socket.emit("errorMsg", "Nom ou PIN incorrect.");
-      return;
-    }
-
-    if (player.id === room.impostorId) {
-      socket.emit("roleResult", "Tu es l'IMPOSTEUR.");
-    } else {
-      socket.emit("roleResult", "Tu es innocent. Mot secret : " + room.word);
-    }
+    // Tirage refait à chaque nouveau joueur
+    chooseImpostor(rooms[code]);
+    sendRoomUpdate(code);
   });
 
   socket.on("disconnect", function () {
-    // Pour cette version simple, on ne supprime pas automatiquement les joueurs.
+    for (const code in rooms) {
+      const room = rooms[code];
+      const before = room.players.length;
+
+      room.players = room.players.filter(player => player.id !== socket.id);
+
+      if (room.players.length !== before) {
+        if (room.players.length === 0) {
+          delete rooms[code];
+        } else {
+          room.started = false;
+          room.impostorId = null;
+          chooseImpostor(room);
+          sendRoomUpdate(code);
+        }
+      }
+    }
   });
 });
 
